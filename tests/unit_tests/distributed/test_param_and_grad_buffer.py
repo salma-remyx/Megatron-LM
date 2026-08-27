@@ -462,6 +462,58 @@ def test_start_param_sync_dp_size_1():
     Utils.destroy_model_parallel()
 
 
+def test_post_param_sync_updates_param_redirected_after_ddp_construction():
+    """A param redirected after DDP construction receives the gathered buffer
+    values in _post_param_sync; still-aliased params stay zero-copy."""
+    Utils.initialize_model_parallel()
+
+    _, _, bucket_groups = get_model_and_buffers(
+        input_dim=100,
+        output_dim=100,
+        num_layers=2,
+        bias=False,
+        shared_embedding=False,
+        bucket_size=None,
+        use_distributed_optimizer=True,
+        overlap_grad_reduce=False,
+        average_in_collective=False,
+    )
+    bucket_group = bucket_groups[0]
+    bucket = bucket_group.buckets[0]
+    assert len(bucket.params_list) >= 2
+    redirected_param, aliased_param = bucket.params_list[0], bucket.params_list[1]
+
+    def buffer_view(param):
+        start, end = bucket.param_to_index[param]
+        return bucket.param_data.view(-1)[start:end].view(param.shape)
+
+    # All params alias their DDP-buffer slice right after construction.
+    assert redirected_param.data.data_ptr() == buffer_view(redirected_param).data_ptr()
+    assert aliased_param.data.data_ptr() == buffer_view(aliased_param).data_ptr()
+
+    # Redirect one param to detached serving storage, as InferenceGroupedMLP does.
+    serving = redirected_param.data.clone().contiguous()
+    redirected_param.data = serving
+    serving_ptr = serving.data_ptr()
+    assert serving_ptr != buffer_view(redirected_param).data_ptr()
+
+    # Simulate the values a param all-gather would deposit in the DDP buffer.
+    buffer_view(redirected_param).add_(1.0)
+
+    bucket_group._post_param_sync()
+
+    # The serving storage keeps its (CUDA-graph-captured) address, stays distinct
+    # from the DDP buffer, and now holds the gathered values exactly.
+    assert redirected_param.data.data_ptr() == serving_ptr
+    assert redirected_param.data.data_ptr() != buffer_view(redirected_param).data_ptr()
+    assert torch.equal(redirected_param.data, buffer_view(redirected_param))
+
+    # Still-aliased params remain zero-copy views into the DDP buffer.
+    assert aliased_param.data.data_ptr() == buffer_view(aliased_param).data_ptr()
+
+    Utils.destroy_model_parallel()
+
+
 class TestFreeOverlapBuffers:
     """Tests for free_overlap_buffers() which releases GPU memory before async checkpoint saves."""
 

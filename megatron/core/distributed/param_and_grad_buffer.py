@@ -342,8 +342,30 @@ class _ParamAndGradBucketGroup:
         self.is_last_microbatch = True
         self.grad_reduce_finished = False
 
+    def _copy_detached_params_from_param_buffer(self):
+        """Copy gathered values into params whose ``.data`` no longer aliases the buffer.
+
+        Some modules redirect a parameter's ``.data`` to a new stable layout after DDP
+        construction (e.g. ``InferenceGroupedMLP``'s contiguous expert tensors, captured
+        by inference CUDA graphs). The optimizer keeps updating ``bucket.param_data``,
+        so such parameters must be refreshed after each gather.
+        """
+        for bucket in self.buckets:
+            if bucket.param_data is None:
+                continue
+            flat_param_data = bucket.param_data.view(-1)
+            for param in bucket.params_list:
+                if _param_uses_quantized_storage(param) or is_grouped_tensor(param):
+                    continue
+                param_start, param_end = bucket.param_to_index[param]
+                buffer_param = flat_param_data[param_start:param_end].view(param.shape)
+                if param.data.data_ptr() != buffer_param.data_ptr():
+                    param.data.copy_(buffer_param)
+
     def _post_param_sync(self):
         """Run post-processing after param all-gather completes."""
+        self._copy_detached_params_from_param_buffer()
+
         if self.ddp_config.reuse_grad_buf_for_mxfp8_param_ag:
             for bucket in self.buckets:
                 if bucket.param_data is None:

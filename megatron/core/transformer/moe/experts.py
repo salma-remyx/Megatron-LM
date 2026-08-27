@@ -1299,6 +1299,7 @@ class InferenceGroupedMLP(TEGroupedMLP):
 
             # Redirect param.data to view into contiguous buffer.
             # The nn.Parameter object stays the same — TE's internal state is preserved.
+            # DDP's post-param-sync re-copies gathered updates into these detached views.
             fc1_param.data = _fc1_weight[i]
             fc2_param.data = _fc2_weight[i]
 
