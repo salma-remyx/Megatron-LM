@@ -292,6 +292,15 @@ class OptimizerConfig:
     muon_extra_scale_factor: float = 1.0
     """Additional scale factor for the muon update."""
 
+    muon_bulk_scale: float = 1.0
+    """Bulk amplification factor for spectral-aware Muon ('spectral_aware_muon'). The top
+    singular direction of the momentum buffer is held at the Muon scale while the remaining
+    bulk directions are amplified by this factor. 1.0 recovers vanilla Muon. Defaults to 1.0."""
+
+    muon_head_power_iters: int = 1
+    """Number of power iterations used to estimate the top singular direction (the spectral
+    head) of the momentum buffer in spectral-aware Muon. Defaults to 1."""
+
     muon_scalar_optimizer: str = 'adam'
     """Optimizer for nonlinear parameters (embeddings, biases, norms) when using muon.
     One of 'adam' or 'lion'. Defaults to 'adam'."""
