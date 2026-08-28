@@ -10,7 +10,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 import torch
 
-from megatron.core.distributed.distributed_data_parallel_config import DistributedDataParallelConfig
+from megatron.core.distributed.distributed_data_parallel_config import (
+    DistributedDataParallelConfig,
+)
 from megatron.core.optimizer import OptimizerConfig
 from megatron.training.argument_utils import (
     ArgumentGroupFactory,
@@ -18,7 +20,11 @@ from megatron.training.argument_utils import (
     core_transformer_config_from_args,
     pretrain_cfg_container_from_args,
 )
-from megatron.training.arguments import add_megatron_arguments, parse_args, validate_args
+from megatron.training.arguments import (
+    add_megatron_arguments,
+    parse_args,
+    validate_args,
+)
 from megatron.training.config import PretrainConfigContainer
 
 
@@ -75,7 +81,7 @@ def test_moe_norm_flag_reaches_transformer_config():
 
 def test_moe_norm_flag_requires_latent_size(monkeypatch):
     """validate_args should reject the LatentMoE norm flag without a latent size."""
-    monkeypatch.setattr(sys, 'argv', ['test_argument_utils.py'])
+    monkeypatch.setattr(sys, "argv", ["test_argument_utils.py"])
     args = parse_args()
     args.num_layers = 2
     args.hidden_size = 128
@@ -87,12 +93,72 @@ def test_moe_norm_flag_requires_latent_size(monkeypatch):
     # active data-parallel size in distributed unit-test jobs.
     args.train_iters = 1
     args.lr = 1e-4
-    args.tokenizer_type = 'NullTokenizer'
+    args.tokenizer_type = "NullTokenizer"
     args.vocab_size = 1024
     args.moe_use_norm_before_up_proj = True
     args.moe_latent_size = None
 
     with pytest.raises(AssertionError, match="--moe-use-norm-before-up-proj requires"):
+        validate_args(args)
+
+
+def test_muon_spectral_flags_reach_optimizer_config():
+    """The spectral-aware Muon flags should populate the optimizer config."""
+    from megatron.training.training import get_megatron_optimizer_config
+
+    parser = ArgumentParser()
+    add_megatron_arguments(parser)
+
+    default_args = parser.parse_args([])
+    assert default_args.muon_bulk_scale == 1.0
+    assert default_args.muon_head_power_iters == 1
+    config, _ = get_megatron_optimizer_config(default_args)
+    assert config.muon_bulk_scale == 1.0
+    assert config.muon_head_power_iters == 1
+
+    spectral_args = parser.parse_args(
+        [
+            "--optimizer",
+            "spectral_aware_muon",
+            "--muon-bulk-scale",
+            "2.0",
+            "--muon-head-power-iters",
+            "8",
+        ]
+    )
+    config, _ = get_megatron_optimizer_config(spectral_args)
+    assert config.muon_bulk_scale == 2.0
+    assert config.muon_head_power_iters == 8
+
+
+@pytest.mark.parametrize(
+    "flag_attr,flag_value,match",
+    [
+        ("muon_bulk_scale", 2.0, "--muon-bulk-scale requires"),
+        ("muon_head_power_iters", 4, "--muon-head-power-iters requires"),
+    ],
+)
+def test_muon_spectral_flags_require_spectral_aware_muon(
+    monkeypatch, flag_attr, flag_value, match
+):
+    """validate_args should reject spectral Muon flags without the spectral optimizer."""
+    monkeypatch.setattr(sys, "argv", ["test_argument_utils.py"])
+    args = parse_args()
+    args.num_layers = 2
+    args.hidden_size = 128
+    args.num_attention_heads = 4
+    args.max_position_embeddings = 1024
+    args.seq_length = 1024
+    args.micro_batch_size = 1
+    # Let validate_args derive a global batch size that is valid for the
+    # active data-parallel size in distributed unit-test jobs.
+    args.train_iters = 1
+    args.lr = 1e-4
+    args.tokenizer_type = "NullTokenizer"
+    args.vocab_size = 1024
+    setattr(args, flag_attr, flag_value)
+
+    with pytest.raises(AssertionError, match=match):
         validate_args(args)
 
 
@@ -163,11 +229,11 @@ class TestArgumentGroupFactoryBasic:
         args = parser.parse_args([])
 
         # Check all fields exist
-        assert hasattr(args, 'name')
-        assert hasattr(args, 'count')
-        assert hasattr(args, 'learning_rate')
-        assert hasattr(args, 'enabled')
-        assert hasattr(args, 'disabled_feature')
+        assert hasattr(args, "name")
+        assert hasattr(args, "count")
+        assert hasattr(args, "learning_rate")
+        assert hasattr(args, "enabled")
+        assert hasattr(args, "disabled_feature")
 
     def test_default_values_preserved(self):
         """Test that default values from dataclass are preserved."""
@@ -192,11 +258,11 @@ class TestArgumentGroupFactoryBasic:
 
         # Parse with actual values
         args = parser.parse_args(
-            ['--name', 'test_name', '--count', '100', '--learning-rate', '0.01']
+            ["--name", "test_name", "--count", "100", "--learning-rate", "0.01"]
         )
 
         assert isinstance(args.name, str)
-        assert args.name == 'test_name'
+        assert args.name == "test_name"
         assert isinstance(args.count, int)
         assert args.count == 100
         assert isinstance(args.learning_rate, float)
@@ -214,7 +280,7 @@ class TestArgumentGroupFactoryBasic:
         assert args.enabled == False
 
         # With flag, should be True
-        args = parser.parse_args(['--enabled'])
+        args = parser.parse_args(["--enabled"])
         assert args.enabled == True
 
     def test_boolean_store_false(self):
@@ -229,11 +295,11 @@ class TestArgumentGroupFactoryBasic:
         assert args.disabled_feature == True
 
         # With --no- flag, should be False
-        args = parser.parse_args(['--no-disabled-feature'])
+        args = parser.parse_args(["--no-disabled-feature"])
         assert args.disabled_feature == False
 
         # With --disable- flag, should also be False
-        args = parser.parse_args(['--disable-disabled-feature'])
+        args = parser.parse_args(["--disable-disabled-feature"])
         assert args.disabled_feature == False
 
     def test_field_docstrings_as_help(self):
@@ -242,10 +308,10 @@ class TestArgumentGroupFactoryBasic:
         factory = ArgumentGroupFactory(DummyConfig)
 
         # Check that field_docstrings were extracted
-        assert 'name' in factory.field_docstrings
-        assert factory.field_docstrings['name'] == "Name of the configuration"
-        assert factory.field_docstrings['count'] == "Number of items"
-        assert factory.field_docstrings['learning_rate'] == "Learning rate for training"
+        assert "name" in factory.field_docstrings
+        assert factory.field_docstrings["name"] == "Name of the configuration"
+        assert factory.field_docstrings["count"] == "Number of items"
+        assert factory.field_docstrings["learning_rate"] == "Learning rate for training"
 
     def test_enum_handling(self):
         """Test that enum types are handled correctly."""
@@ -272,28 +338,28 @@ class TestArgumentGroupFactoryExclusion:
     def test_exclude_single_field(self):
         """Test excluding a single field."""
         parser = ArgumentParser()
-        factory = ArgumentGroupFactory(DummyConfig, exclude=['count'])
+        factory = ArgumentGroupFactory(DummyConfig, exclude=["count"])
 
         factory.build_group(parser, title="Test Group")
         args = parser.parse_args([])
 
         # Excluded field should not exist
-        assert hasattr(args, 'name')
-        assert not hasattr(args, 'count')
-        assert hasattr(args, 'learning_rate')
+        assert hasattr(args, "name")
+        assert not hasattr(args, "count")
+        assert hasattr(args, "learning_rate")
 
     def test_exclude_multiple_fields(self):
         """Test excluding multiple fields."""
         parser = ArgumentParser()
-        factory = ArgumentGroupFactory(DummyConfig, exclude=['count', 'learning_rate'])
+        factory = ArgumentGroupFactory(DummyConfig, exclude=["count", "learning_rate"])
 
         factory.build_group(parser, title="Test Group")
         args = parser.parse_args([])
 
-        assert hasattr(args, 'name')
-        assert not hasattr(args, 'count')
-        assert not hasattr(args, 'learning_rate')
-        assert hasattr(args, 'enabled')
+        assert hasattr(args, "name")
+        assert not hasattr(args, "count")
+        assert not hasattr(args, "learning_rate")
+        assert hasattr(args, "enabled")
 
 
 class TestArgumentGroupFactoryOptional:
@@ -314,7 +380,14 @@ class TestArgumentGroupFactoryOptional:
 
         # Provided values
         args = parser.parse_args(
-            ['--required-field', 'new_value', '--optional-field', '123', '--optional-str', 'custom']
+            [
+                "--required-field",
+                "new_value",
+                "--optional-field",
+                "123",
+                "--optional-str",
+                "custom",
+            ]
         )
         assert args.required_field == "new_value"
         assert args.optional_field == 123
@@ -337,8 +410,10 @@ class TestArgumentGroupFactoryList:
         assert args.numbers == [1, 2, 3]
 
         # Provided values
-        args = parser.parse_args(['--tags', 'tag1', 'tag2', 'tag3', '--numbers', '10', '20', '30'])
-        assert args.tags == ['tag1', 'tag2', 'tag3']
+        args = parser.parse_args(
+            ["--tags", "tag1", "tag2", "tag3", "--numbers", "10", "20", "30"]
+        )
+        assert args.tags == ["tag1", "tag2", "tag3"]
         assert args.numbers == [10, 20, 30]
 
 
@@ -358,7 +433,7 @@ class TestArgumentGroupFactoryLiteral:
         assert args.precision == 32
 
         # Valid choices
-        args = parser.parse_args(['--mode', 'eval', '--precision', '16'])
+        args = parser.parse_args(["--mode", "eval", "--precision", "16"])
         assert args.mode == "eval"
         assert args.precision == 16
 
@@ -371,10 +446,10 @@ class TestArgumentGroupFactoryLiteral:
 
         # Invalid choice should raise error
         with pytest.raises(SystemExit):
-            parser.parse_args(['--mode', 'invalid'])
+            parser.parse_args(["--mode", "invalid"])
 
         with pytest.raises(SystemExit):
-            parser.parse_args(['--precision', '64'])
+            parser.parse_args(["--precision", "64"])
 
 
 class TestArgumentGroupFactoryHelpers:
@@ -386,14 +461,19 @@ class TestArgumentGroupFactoryHelpers:
 
         assert factory._format_arg_name("simple") == "--simple"
         assert factory._format_arg_name("with_underscore") == "--with-underscore"
-        assert factory._format_arg_name("multiple_under_scores") == "--multiple-under-scores"
+        assert (
+            factory._format_arg_name("multiple_under_scores")
+            == "--multiple-under-scores"
+        )
 
     def test_format_arg_name_with_prefix(self):
         """Test argument name formatting with prefix."""
         factory = ArgumentGroupFactory(DummyConfig)
 
         assert factory._format_arg_name("feature", prefix="no") == "--no-feature"
-        assert factory._format_arg_name("feature", prefix="disable") == "--disable-feature"
+        assert (
+            factory._format_arg_name("feature", prefix="disable") == "--disable-feature"
+        )
         assert factory._format_arg_name("multi_word", prefix="no") == "--no-multi-word"
 
     def test_extract_type_primitive(self):
@@ -449,7 +529,8 @@ class ConfigWithArgparseMeta:
     """Field with type override"""
 
     custom_default: str = field(
-        default="original_default", metadata={"argparse_meta": {"default": "overridden_default"}}
+        default="original_default",
+        metadata={"argparse_meta": {"default": "overridden_default"}},
     )
     """Field with default override"""
 
@@ -483,7 +564,9 @@ class ConfigWithArgparseMeta:
     )
     """Field with multiple metadata overrides"""
 
-    nargs_override: str = field(default="single", metadata={"argparse_meta": {"nargs": "?"}})
+    nargs_override: str = field(
+        default="single", metadata={"argparse_meta": {"nargs": "?"}}
+    )
     """Field with nargs override"""
 
 
@@ -527,7 +610,7 @@ class TestArgumentGroupFactoryArgparseMeta:
 
         # Find the action for this argument
         for action in parser._actions:
-            if hasattr(action, 'dest') and action.dest == 'custom_help':
+            if hasattr(action, "dest") and action.dest == "custom_help":
                 assert action.help == "Custom help text from metadata"
                 return
 
@@ -541,7 +624,7 @@ class TestArgumentGroupFactoryArgparseMeta:
         factory.build_group(parser, title="Test Group")
 
         # Parse with integer value (metadata overrides type to int)
-        args = parser.parse_args(['--custom-type', '42'])
+        args = parser.parse_args(["--custom-type", "42"])
 
         # Should be parsed as int, not str
         assert isinstance(args.custom_type, int)
@@ -568,12 +651,12 @@ class TestArgumentGroupFactoryArgparseMeta:
         factory.build_group(parser, title="Test Group")
 
         # Valid choice from metadata
-        args = parser.parse_args(['--custom-choices', 'option2'])
+        args = parser.parse_args(["--custom-choices", "option2"])
         assert args.custom_choices == "option2"
 
         # Invalid choice should fail
         with pytest.raises(SystemExit):
-            parser.parse_args(['--custom-choices', 'invalid_option'])
+            parser.parse_args(["--custom-choices", "invalid_option"])
 
     def test_dest_override(self):
         """Test that argparse_meta can override destination name."""
@@ -582,10 +665,10 @@ class TestArgumentGroupFactoryArgparseMeta:
 
         factory.build_group(parser, title="Test Group")
 
-        args = parser.parse_args(['--custom-dest', 'test_value'])
+        args = parser.parse_args(["--custom-dest", "test_value"])
 
         # Should be stored in renamed destination
-        assert hasattr(args, 'renamed_destination')
+        assert hasattr(args, "renamed_destination")
         assert args.renamed_destination == "test_value"
 
     def test_action_override(self):
@@ -596,7 +679,7 @@ class TestArgumentGroupFactoryArgparseMeta:
         factory.build_group(parser, title="Test Group")
 
         # With custom action=store_const and const="special_value"
-        args = parser.parse_args(['--custom-action'])
+        args = parser.parse_args(["--custom-action"])
         assert args.custom_action == "special_value"
 
         # Without flag, should use default
@@ -614,17 +697,17 @@ class TestArgumentGroupFactoryArgparseMeta:
         args = parser.parse_args([])
 
         # Check all overrides applied
-        assert hasattr(args, 'multi_override_dest')
+        assert hasattr(args, "multi_override_dest")
         assert args.multi_override_dest == "999"  # default override
 
         # Parse with value to check type override
-        args = parser.parse_args(['--multiple-overrides', 'text_value'])
+        args = parser.parse_args(["--multiple-overrides", "text_value"])
         assert isinstance(args.multi_override_dest, str)  # type override
         assert args.multi_override_dest == "text_value"
 
         # Check help override was applied
         for action in parser._actions:
-            if hasattr(action, 'dest') and action.dest == 'multi_override_dest':
+            if hasattr(action, "dest") and action.dest == "multi_override_dest":
                 assert action.help == "Multiple overrides applied"
                 break
 
@@ -636,11 +719,11 @@ class TestArgumentGroupFactoryArgparseMeta:
         factory.build_group(parser, title="Test Group")
 
         # With nargs='?', argument is optional
-        args = parser.parse_args(['--nargs-override'])
+        args = parser.parse_args(["--nargs-override"])
         assert args.nargs_override is None  # No value provided with '?'
 
         # With value
-        args = parser.parse_args(['--nargs-override', 'provided_value'])
+        args = parser.parse_args(["--nargs-override", "provided_value"])
         assert args.nargs_override == "provided_value"
 
         # Without flag at all, should use default
@@ -656,10 +739,10 @@ class TestArgumentGroupFactoryArgparseMeta:
         from dataclasses import fields as dc_fields
 
         for f in dc_fields(ConfigWithArgparseMeta):
-            if f.name == 'custom_type':
+            if f.name == "custom_type":
                 kwargs = factory._build_argparse_kwargs_from_field(f)
                 # Metadata type should override inferred type
-                assert kwargs['type'] == int
+                assert kwargs["type"] == int
                 break
 
     def test_unhandled_unsupported_callables(self):
@@ -675,11 +758,13 @@ class TestArgumentGroupFactoryArgparseMeta:
     def test_handled_unsupported_callables(self):
         """Test an attribute with an unsupported type that has type info in the metadata."""
         parser = ArgumentParser()
-        factory = ArgumentGroupFactory(ConfigWithUnsupportedCallables, exclude=["unsupported_type"])
+        factory = ArgumentGroupFactory(
+            ConfigWithUnsupportedCallables, exclude=["unsupported_type"]
+        )
 
         factory.build_group(parser, title="Test Group")
 
-        args = parser.parse_args(['--unsupported-with-metadata', '0'])
+        args = parser.parse_args(["--unsupported-with-metadata", "0"])
         assert args.unsupported_with_metadata == 0
 
     def test_unhandled_unsupported_unions(self):
@@ -689,21 +774,25 @@ class TestArgumentGroupFactoryArgparseMeta:
             ConfigWithUnsupportedUnions, exclude=["unsupported_with_metadata"]
         )
 
-        with pytest.raises(TypeInferenceError, match="Unions not supported by argparse"):
+        with pytest.raises(
+            TypeInferenceError, match="Unions not supported by argparse"
+        ):
             factory.build_group(parser, title="Test Group")
 
     def test_handled_unsupported_unions(self):
         """Test an attribute with an unsupported type that has type info in the metadata."""
         parser = ArgumentParser(exit_on_error=False)
-        factory = ArgumentGroupFactory(ConfigWithUnsupportedUnions, exclude=["unsupported_type"])
+        factory = ArgumentGroupFactory(
+            ConfigWithUnsupportedUnions, exclude=["unsupported_type"]
+        )
 
         factory.build_group(parser, title="Test Group")
 
-        args = parser.parse_args(['--unsupported-with-metadata', 'foo'])
-        assert args.unsupported_with_metadata == 'foo'
+        args = parser.parse_args(["--unsupported-with-metadata", "foo"])
+        assert args.unsupported_with_metadata == "foo"
 
         with pytest.raises(ArgumentError, match="invalid choice"):
-            args = parser.parse_args(['--unsupported-with-metadata', 'baz'])
+            args = parser.parse_args(["--unsupported-with-metadata", "baz"])
 
 
 class TestMegatronNetworkArgumentGeneration:
@@ -820,7 +909,10 @@ def patch_training_helpers(mock_optimizer_config, mock_ddp_config):
             "megatron.training.training.get_megatron_optimizer_config",
             return_value=(mock_optimizer_config, {}),
         ),
-        patch("megatron.training.training.get_megatron_ddp_config", return_value=mock_ddp_config),
+        patch(
+            "megatron.training.training.get_megatron_ddp_config",
+            return_value=mock_ddp_config,
+        ),
     ):
         yield
 
@@ -954,11 +1046,15 @@ class TestRerunStateMachineConfigMapping:
     """Test the check_for_nan_in_loss_and_grad → check_for_nan_in_loss mapping."""
 
     def test_check_for_nan_true(self, patch_training_helpers):
-        result = pretrain_cfg_container_from_args(_make_args(check_for_nan_in_loss_and_grad=True))
+        result = pretrain_cfg_container_from_args(
+            _make_args(check_for_nan_in_loss_and_grad=True)
+        )
         assert result.rerun_state_machine.check_for_nan_in_loss is True
 
     def test_check_for_nan_false(self, patch_training_helpers):
-        result = pretrain_cfg_container_from_args(_make_args(check_for_nan_in_loss_and_grad=False))
+        result = pretrain_cfg_container_from_args(
+            _make_args(check_for_nan_in_loss_and_grad=False)
+        )
         assert result.rerun_state_machine.check_for_nan_in_loss is False
 
     def test_direct_rerun_state_machine_fields_from_args(self, patch_training_helpers):
