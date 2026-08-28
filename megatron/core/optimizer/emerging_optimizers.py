@@ -742,3 +742,10 @@ if HAVE_EMERGING_OPTIMIZERS:
         _EMERGING_OPTIMIZERS[eopt_name] = EmergingOptimizerEntry(
             optimizer_cls=registry.get_optimizer_cls(eopt_name)
         )
+
+# Registers 'spectral_aware_muon'. Late import: spectral_allocation subclasses
+# TensorParallelMuon, so importing it here at module bottom avoids a circular
+# dependency while still registering the entry at import time.
+from . import (  # noqa: F401,E402  pylint: disable=wrong-import-position,unused-import
+    spectral_allocation as _spectral_allocation,
+)

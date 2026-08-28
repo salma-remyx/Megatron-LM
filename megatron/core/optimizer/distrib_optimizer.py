@@ -819,7 +819,7 @@ class DistributedOptimizer(MixedPrecisionOptimizer):
         # When Muon is the top-level optimizer, the DistributedOptimizer wrapping
         # scalar parameters uses muon_scalar_optimizer (e.g., Lion) as the actual
         # optimizer, so look up state keys by that name instead.
-        if optimizer_name == "muon":
+        if optimizer_name in ("muon", "spectral_aware_muon"):
             optimizer_name = self.config.muon_scalar_optimizer
         return _OPTIMIZER_STATE_KEYS.get(optimizer_name, ("exp_avg", "exp_avg_sq"))
 

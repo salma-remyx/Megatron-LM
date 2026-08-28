@@ -6,7 +6,7 @@ from torch.optim import Adam
 from torch.utils.data import DataLoader
 from functools import partial
 from pathlib import Path
-from typing import Any, Callable, Dict, Tuple, Iterator
+from typing import Any, Callable, Dict, List, Tuple, Iterator
 from megatron.core import parallel_state
 from megatron.core import dist_checkpointing
 from megatron.core.pipeline_parallel.schedules import get_forward_backward_func
@@ -25,6 +25,53 @@ from megatron.core.distributed.finalize_model_grads import finalize_model_grads
 from megatron.core.tokenizers import MegatronTokenizer
 
 _SEQUENCE_LENGTH: int = 64
+
+
+def build_optimizers(
+    model: torch.nn.Module, optimizer_name: str = "adam"
+) -> List[torch.optim.Optimizer]:
+    """Build the optimizer(s) used by the training loop.
+
+    Args:
+        model: The (possibly DDP-wrapped) model whose parameters are optimized.
+        optimizer_name: "adam" for a single Adam over all parameters, or
+            "spectral_aware_muon" to optimize 2-D non-embedding weights with
+            spectral-aware Muon (TensorParallelSpectralAwareMuon) and everything
+            else with Adam, mirroring the muon param split in megatron.core.optimizer.
+
+    Returns:
+        List of optimizers to zero_grad()/step() each iteration. Falls back to
+        plain Adam when spectral-aware Muon is requested but the optional
+        emerging_optimizers package is not installed.
+    """
+    if optimizer_name == "adam":
+        return [Adam(model.parameters())]
+    if optimizer_name == "spectral_aware_muon":
+        from megatron.core.optimizer.emerging_optimizers import HAVE_EMERGING_OPTIMIZERS
+
+        if not HAVE_EMERGING_OPTIMIZERS:
+            print("emerging_optimizers is not installed; falling back to Adam")
+            return [Adam(model.parameters())]
+        from megatron.core.optimizer.spectral_allocation import (
+            TensorParallelSpectralAwareMuon,
+        )
+
+        muon_params = [
+            p
+            for p in model.parameters()
+            if p.ndim == 2 and not getattr(p, 'is_embedding_or_output_parameter', False)
+        ]
+        muon_param_ids = {id(p) for p in muon_params}
+        adam_params = [p for p in model.parameters() if id(p) not in muon_param_ids]
+        bulk_scale = float(os.environ.get("SAMUON_BULK_SCALE", "1.5"))
+        optimizers: List[torch.optim.Optimizer] = [
+            TensorParallelSpectralAwareMuon(muon_params, bulk_scale=bulk_scale)
+        ]
+        if adam_params:
+            optimizers.append(Adam(adam_params))
+        return optimizers
+    raise ValueError(f"Unsupported optimizer for this example: {optimizer_name}")
+
 
 def initialize_distributed(
     tensor_model_parallel_size: int = 1, pipeline_model_parallel_size: int = 1
@@ -240,7 +287,8 @@ if __name__ == "__main__":
         module=gpt_model,
     )
 
-    optim: Adam = Adam(gpt_model.parameters())
+    optimizer_name: str = os.environ.get("OPTIMIZER", "adam")
+    optims: List[torch.optim.Optimizer] = build_optimizers(gpt_model, optimizer_name)
 
     train_iterator: Iterator = get_train_data_iterator()
 
@@ -248,7 +296,8 @@ if __name__ == "__main__":
 
     # Running the model for 5 iterations
     for iteration in range(5):
-        optim.zero_grad()
+        for optim in optims:
+            optim.zero_grad()
 
         losses_reduced: Dict[str, Any] = forward_backward_func(
             forward_step_func=forward_step_func,
@@ -266,7 +315,8 @@ if __name__ == "__main__":
         # across tensor parallel ranks and all gradients across data parallel ranks.
         finalize_model_grads([gpt_model])
 
-        optim.step()
+        for optim in optims:
+            optim.step()
 
         print(f"Iteration {iteration}: Losses reduced: {losses_reduced}")
 

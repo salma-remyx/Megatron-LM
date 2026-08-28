@@ -2738,6 +2738,16 @@ def _add_regularization_args(parser):
                        'in Newton-Schulz iteration.')
     group.add_argument('--muon-extra-scale-factor', type=float, default=1.0,
                        help='Additional scale factor for the muon update')
+    group.add_argument('--muon-bulk-scale', type=float, default=1.0,
+                       help='Bulk amplification factor for spectral-aware Muon '
+                       '(--optimizer spectral_aware_muon). The top singular direction '
+                       'of the momentum buffer is held at the Muon scale while the '
+                       'remaining bulk directions are amplified by this factor. '
+                       '1.0 recovers vanilla Muon.')
+    group.add_argument('--muon-head-power-iters', type=int, default=1,
+                       help='Number of power iterations used to estimate the top '
+                       'singular direction (the spectral head) of the momentum buffer '
+                       'in spectral-aware Muon.')
     group.add_argument('--muon-scalar-optimizer', type=str, default='adam',
                        choices=['adam', 'lion'],
                        help='Optimizer for scalar parameters (embeddings, biases, norms) '
@@ -3004,7 +3014,8 @@ def _add_training_args(parser):
                        help='use FlashAttention implementation of attention. '
                        'https://arxiv.org/abs/2205.14135')
     group.add_argument('--optimizer', type=str, default='adam',
-                       choices=['adam', 'sgd', 'muon', 'dist_muon', 'lion', 'soap', 'adaptive_muon'],
+                       choices=['adam', 'sgd', 'muon', 'dist_muon', 'lion', 'soap',
+                                'adaptive_muon', 'spectral_aware_muon'],
                        help='Optimizer function. '
                             'Note: dist_muon is deprecated; use --optimizer muon '
                             'with --use-distributed-optimizer instead.')
